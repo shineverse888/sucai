@@ -952,6 +952,10 @@ function buildVMsgHtml(task){
       <div class="tab" onclick="retryVT(${task.id})"><i class="ti ti-refresh"></i>重新生成</div>
     </div>
     <div style="font-size:11px;color:var(--text3);margin-top:6px">${elapsed}s · ${task.dur||''}s · ${task.ratio||''} · ${task.res||''}</div>`;
+  } else if(task.status==='done'&&!task.url){
+    innerContent=`<div style="color:#e07070;font-size:13px;margin-bottom:7px"><i class="ti ti-alert-circle"></i> 生成成功但视频链接为空</div>
+    <div style="font-size:11px;color:var(--text3);margin-bottom:8px">请打开控制台查看 [pollVC] 日志，确认返回数据结构</div>
+    <div style="display:flex;gap:6px"><div class="tab" onclick="retryVT(${task.id})"><i class="ti ti-refresh"></i>重试</div></div>`;
   } else if(task.status==='failed'){
     innerContent=`<div style="color:#e07070;font-size:13px;margin-bottom:8px"><i class="ti ti-alert-circle"></i> 生成失败</div>
     ${task.errMsg?'<div style="font-size:11px;color:var(--text3);margin-bottom:8px;line-height:1.5;word-break:break-all">'+esc(task.errMsg)+'</div>':''}
@@ -982,10 +986,61 @@ function renderVTasks(){
   vmEl.scrollTop=vmEl.scrollHeight;
   renderVTaskCount();
 }
-async function submitVTask(task,vp,key,prompt,model){const at=vp.apiType;if(at==='volcengine'){const fp=prompt+' --resolution '+task.res+' --duration '+task.dur+' --ratio '+task.ratio;const base=apiUrls.doubao||'https://ark.cn-beijing.volces.com/api/v3';const r=await fetch(base+'/contents/generations/tasks',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},body:JSON.stringify({model,content:[{type:'text',text:fp}]}),signal:AbortSignal.timeout(30000)});const d=await r.json();if(d.id){task.rid=d.id;task.status='running';task.progress=12;updateVMsg(task);pollVC(task,key,base);}else{task.status='failed';task.errMsg=JSON.stringify(d.error||d);updateVMsg(task);}}else if(at==='kling'){const base=apiUrls.kling||'https://api.klingai.com';const r=await fetch(base+'/v1/videos/text2video',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},body:JSON.stringify({model,prompt,duration:parseInt(task.dur||5),aspect_ratio:task.ratio,cfg_scale:0.7}),signal:AbortSignal.timeout(30000)});const d=await r.json();if(d.data?.task_id){task.rid=d.data.task_id;task.status='running';task.progress=10;updateVMsg(task);pollKling(task,key,base);}else{task.status='failed';task.errMsg=JSON.stringify(d);updateVMsg(task);}}else if(at==='wan'){const base=apiUrls.wan||'https://dashscope.aliyuncs.com';const r=await fetch(base+'/api/v1/services/aigc/video-generation/video-synthesis',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'apikey '+key,'X-DashScope-Async':'enable'},body:JSON.stringify({model,input:{text:prompt},parameters:{duration:parseInt(task.dur||5),resolution:task.res,aspect_ratio:task.ratio}}),signal:AbortSignal.timeout(30000)});const d=await r.json();if(d.output?.task_id){task.rid=d.output.task_id;task.status='running';task.progress=10;updateVMsg(task);pollWan(task,key,base);}else{task.status='failed';task.errMsg=JSON.stringify(d);updateVMsg(task);}}else if(at==='runway'){const base=apiUrls.runway||'https://api.dev.runwayml.com/v1';const r=await fetch(base+'/image_to_video',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+key,'X-Runway-Version':'2024-11-06'},body:JSON.stringify({model,promptText:prompt,ratio:task.ratio,duration:parseInt(task.dur||5)}),signal:AbortSignal.timeout(30000)});const d=await r.json();if(d.id){task.rid=d.id;task.status='running';task.progress=10;updateVMsg(task);pollRunway(task,key,base);}else{task.status='failed';task.errMsg=JSON.stringify(d);updateVMsg(task);}}else{task.status='failed';task.errMsg=vp.name+' 暂时通过官方网页端操作，API集成开发中';updateVMsg(task);}}
+async function submitVTask(task,vp,key,prompt,model){const at=vp.apiType;if(at==='volcengine'){const fp=prompt+' --resolution '+task.res+' --duration '+task.dur+' --ratio '+task.ratio;const base=apiUrls.doubao||'https://ark.cn-beijing.volces.com/api/v3';const r=await fetch(base+'/contents/generations/tasks',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},body:JSON.stringify({model,content:[{type:'text',text:fp}]}),signal:AbortSignal.timeout(30000)});const d=await r.json();if(d.id||d.task_id){
+      task.rid=d.id||d.task_id;task.status='running';task.progress=12;
+      updateVMsg(task);pollVC(task,key,base);
+    }else if(d.status==='succeeded'&&(d.content||d.video_url)){
+      // 同步直接返回完成
+      task.status='done';task.progress=100;
+      task.url=d.content?.[0]?.video_url||d.video_url;
+      saveVA(task);updateVMsg(task);
+    }else{
+      task.status='failed';
+      task.errMsg=d.error?.message||d.message||JSON.stringify(d).slice(0,200);
+      updateVMsg(task);
+    }}else if(at==='kling'){const base=apiUrls.kling||'https://api.klingai.com';const r=await fetch(base+'/v1/videos/text2video',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},body:JSON.stringify({model,prompt,duration:parseInt(task.dur||5),aspect_ratio:task.ratio,cfg_scale:0.7}),signal:AbortSignal.timeout(30000)});const d=await r.json();if(d.data?.task_id){task.rid=d.data.task_id;task.status='running';task.progress=10;updateVMsg(task);pollKling(task,key,base);}else{task.status='failed';task.errMsg=JSON.stringify(d);updateVMsg(task);}}else if(at==='wan'){const base=apiUrls.wan||'https://dashscope.aliyuncs.com';const r=await fetch(base+'/api/v1/services/aigc/video-generation/video-synthesis',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'apikey '+key,'X-DashScope-Async':'enable'},body:JSON.stringify({model,input:{text:prompt},parameters:{duration:parseInt(task.dur||5),resolution:task.res,aspect_ratio:task.ratio}}),signal:AbortSignal.timeout(30000)});const d=await r.json();if(d.output?.task_id){task.rid=d.output.task_id;task.status='running';task.progress=10;updateVMsg(task);pollWan(task,key,base);}else{task.status='failed';task.errMsg=JSON.stringify(d);updateVMsg(task);}}else if(at==='runway'){const base=apiUrls.runway||'https://api.dev.runwayml.com/v1';const r=await fetch(base+'/image_to_video',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+key,'X-Runway-Version':'2024-11-06'},body:JSON.stringify({model,promptText:prompt,ratio:task.ratio,duration:parseInt(task.dur||5)}),signal:AbortSignal.timeout(30000)});const d=await r.json();if(d.id){task.rid=d.id;task.status='running';task.progress=10;updateVMsg(task);pollRunway(task,key,base);}else{task.status='failed';task.errMsg=JSON.stringify(d);updateVMsg(task);}}else{task.status='failed';task.errMsg=vp.name+' 暂时通过官方网页端操作，API集成开发中';updateVMsg(task);}}
 function mkPoll(task,fn){const iv=setInterval(async()=>{if(await fn())clearInterval(iv);},4500);setTimeout(async()=>{if(await fn())clearInterval(iv);},3000);}
 function saveVA(task){if(!task.url)return;addAsset({type:'video',url:task.url,name:'video_'+new Date().toISOString().slice(0,19).replace(/[:.]/g,'-')+'.mp4',prompt:task.prompt,model:task.model,provider:task.provName,createdAt:Date.now()});}
-async function pollVC(task,key,base){mkPoll(task,async()=>{try{const r=await fetch(base+'/contents/generations/tasks/'+task.rid,{headers:{'Authorization':'Bearer '+key}});const d=await r.json();if(d.status==='succeeded'){task.status='done';task.progress=100;task.url=d.content?.[0]?.video_url;saveVA(task);updateVMsg(task);return true;}if(d.status==='failed'){task.status='failed';task.errMsg=d.error?.message||'失败';updateVMsg(task);return true;}task.progress=Math.min(task.progress+6,90);updateVMsg(task);}catch(e){}return false;});}
+async function pollVC(task,key,base){
+  task._pollErr=0;
+  mkPoll(task,async()=>{
+    try{
+      const r=await fetch(base+'/contents/generations/tasks/'+task.rid,{
+        headers:{'Authorization':'Bearer '+key},
+        signal:AbortSignal.timeout(15000)
+      });
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      const d=await r.json();
+      if(d.status==='succeeded'){
+        task.status='done';task.progress=100;
+        (function(){
+        const c=d.content&&d.content[0];
+        task.url=(c&&(c.video_url||c.url||c.uri||c.video_uri))||d.video_url||d.url||'';
+        console.log('[pollVC] url extracted:',task.url?task.url.slice(0,80)+'...':'(empty)','raw keys:',(c?Object.keys(c):[]));
+      })();
+        if(!task.url)console.warn('[pollVC] succeeded but no url, raw:',JSON.stringify(d).slice(0,300));
+        saveVA(task);updateVMsg(task);return true;
+      }
+      if(d.status==='failed'){
+        task.status='failed';
+        task.errMsg=d.error?.message||d.message||'生成失败';
+        updateVMsg(task);return true;
+      }
+      task._pollErr=0;
+      task.progress=Math.min(task.progress+6,90);
+      updateVMsg(task);
+    }catch(e){
+      task._pollErr=(task._pollErr||0)+1;
+      console.warn('[pollVC] poll error #'+task._pollErr+':',e.message);
+      if(task._pollErr>=5){
+        task.status='failed';
+        task.errMsg='轮询失败('+e.message+')，已重试'+task._pollErr+'次';
+        updateVMsg(task);return true;
+      }
+    }
+    return false;
+  });
+}
 async function pollKling(task,key,base){mkPoll(task,async()=>{try{const r=await fetch(base+'/v1/videos/text2video/'+task.rid,{headers:{'Authorization':'Bearer '+key}});const d=await r.json();const s=d.data?.task_status;if(s==='succeed'){task.status='done';task.progress=100;task.url=d.data?.task_result?.videos?.[0]?.url;saveVA(task);updateVMsg(task);return true;}if(s==='failed'){task.status='failed';task.errMsg=d.data?.task_status_msg;updateVMsg(task);return true;}task.progress=Math.min(task.progress+5,90);updateVMsg(task);}catch(e){}return false;});}
 async function pollWan(task,key,base){mkPoll(task,async()=>{try{const r=await fetch(base+'/api/v1/tasks/'+task.rid,{headers:{'Authorization':'apikey '+key}});const d=await r.json();const s=d.output?.task_status;if(s==='SUCCEEDED'){task.status='done';task.progress=100;task.url=d.output?.video_url;saveVA(task);updateVMsg(task);return true;}if(s==='FAILED'){task.status='failed';task.errMsg=d.output?.message;updateVMsg(task);return true;}task.progress=Math.min(task.progress+5,90);updateVMsg(task);}catch(e){}return false;});}
 async function pollRunway(task,key,base){mkPoll(task,async()=>{try{const r=await fetch(base+'/tasks/'+task.rid,{headers:{'Authorization':'Bearer '+key,'X-Runway-Version':'2024-11-06'}});const d=await r.json();if(d.status==='SUCCEEDED'){task.status='done';task.progress=100;task.url=d.output?.[0];saveVA(task);updateVMsg(task);return true;}if(d.status==='FAILED'){task.status='failed';task.errMsg=d.failure;updateVMsg(task);return true;}task.progress=Math.min(task.progress+7,90);updateVMsg(task);}catch(e){}return false;});}
